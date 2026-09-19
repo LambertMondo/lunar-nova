@@ -89,7 +89,16 @@ export default function InvoiceDashboard({ chartData, deleteInvoice, filterStatu
                             <div className="flex items-center gap-3">
                                 <span className="px-2 py-0.5 rounded-full text-[10px] font-bold" style={{ background: st.bg, color: st.text }}>{t(st.labelKey)}</span>
                                 <span className="text-sm font-bold text-gray-800 dark:text-gray-100 w-28 text-right tabular-nums">{fmt(total, inv.currency)}</span>
-                                <button onClick={e => { e.stopPropagation(); window.confirm(t('confirmDelete')) && deleteInvoice(inv.id); }}
+                                <button onClick={async e => {
+                                    e.stopPropagation();
+                                    if (!window.confirm(t('confirmDelete'))) return;
+                                    try {
+                                        await deleteInvoice(inv.id);
+                                    } catch (err) {
+                                        console.error(err);
+                                        window.alert(err.message || t('errorDelete'));
+                                    }
+                                }}
                                     className="p-1 rounded-lg opacity-0 group-hover:opacity-100 text-gray-300 hover:text-red-500 transition-all">
                                     <svg width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><polyline points="3 6 5 6 21 6" /><path d="M19 6l-1 14H6L5 6" /></svg>
                                 </button>

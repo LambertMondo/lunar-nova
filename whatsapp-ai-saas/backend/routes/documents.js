@@ -30,7 +30,7 @@ router.delete('/:id', async (req, res) => {
         await documentsService.deleteDocument(req.params.id);
         res.json({ status: 'success' });
     } catch (err) {
-        res.status(500).json({ error: err.message });
+        res.status(err.statusCode || 500).json({ error: err.message });
     }
 });
 

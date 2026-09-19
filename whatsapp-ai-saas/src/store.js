@@ -441,7 +441,11 @@ const useAppStore = create(
             },
 
             deleteInvoice: async (invoiceId) => {
-                await fetch(API_BASE_URL + '/api/invoices/' + invoiceId, { method: 'DELETE' });
+                const res = await fetch(API_BASE_URL + '/api/invoices/' + invoiceId, { method: 'DELETE' });
+                if (!res.ok) {
+                    const body = await res.json().catch(() => ({}));
+                    throw new Error(body.error || `Delete failed (${res.status})`);
+                }
                 set((state) => ({
                     invoices: state.invoices.filter(inv => inv.id !== invoiceId)
                 }));

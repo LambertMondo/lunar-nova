@@ -24,9 +24,16 @@ async function createDocument({ title, content } = {}) {
 }
 
 async function updateDocument(id, { title, content } = {}) {
+    // Partial updates (CLI/MCP often send only content or only title): omitted
+    // fields must keep their existing value. Passing `undefined` into SQLite
+    // previously stored NULL and wiped the title/content.
+    const existing = await getDocument(id);
+    const nextTitle = title !== undefined ? (title || 'Untitled Document') : existing.title;
+    const nextContent = content !== undefined ? (content ?? '') : existing.content;
+
     const result = await pool.query(
         'UPDATE ai_documents SET title = $1, content = $2, updated_at = CURRENT_TIMESTAMP WHERE id = $3 RETURNING *',
-        [title, content, id]
+        [nextTitle, nextContent, id]
     );
     if (result.rows.length === 0) {
         const err = new Error('Document introuvable.');
@@ -37,7 +44,12 @@ async function updateDocument(id, { title, content } = {}) {
 }
 
 async function deleteDocument(id) {
-    await pool.query('DELETE FROM ai_documents WHERE id = $1', [id]);
+    const result = await pool.query('DELETE FROM ai_documents WHERE id = $1', [id]);
+    if (!result.rowCount) {
+        const err = new Error('Document introuvable.');
+        err.statusCode = 404;
+        throw err;
+    }
     return { success: true };
 }
 

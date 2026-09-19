@@ -69,4 +69,39 @@ describe('invoiceService — CRUD sur quotes (SQLite en mémoire)', () => {
         await invoiceService.deleteInvoice(created.id);
         await expect(invoiceService.getInvoice(created.id)).rejects.toMatchObject({ statusCode: 404 });
     });
+
+    it.runIf(sqlite3Available)('deleteInvoice lève une erreur 404 pour un id inconnu (pas de succès silencieux)', async () => {
+        await expect(invoiceService.deleteInvoice(999999)).rejects.toMatchObject({ statusCode: 404 });
+    });
+
+    it.runIf(sqlite3Available)('createInvoice coerce les prix/qtés string et ignore les non-numériques (pas de NaN)', async () => {
+        const ok = await invoiceService.createInvoice({
+            clientName: 'Prix string',
+            items: [{ description: 'A', qty: '2', price: '15000' }],
+            taxRate: '18'
+        });
+        expect(ok.totalAmount).toBe(35400);
+
+        const sanitized = await invoiceService.createInvoice({
+            clientName: 'Prix invalide',
+            items: [{ description: 'B', qty: 2, price: 'abc' }],
+            taxRate: 0
+        });
+        expect(Number.isNaN(sanitized.totalAmount)).toBe(false);
+        expect(sanitized.totalAmount).toBe(0);
+    });
+});
+
+describe('invoiceService.calcTotal — pure helper', () => {
+    it('accepte qty/price numériques ou numériques-en-string', () => {
+        expect(invoiceService.calcTotal([{ qty: 2, price: 15000 }], 18)).toBe(35400);
+        expect(invoiceService.calcTotal([{ qty: '2', price: '15000' }], '18')).toBe(35400);
+    });
+
+    it('ne renvoie jamais NaN pour des prix non numériques', () => {
+        expect(Number.isNaN(invoiceService.calcTotal([{ qty: 1, price: 'abc' }], 0))).toBe(false);
+        expect(invoiceService.calcTotal([{ qty: 1, price: 'abc' }], 0)).toBe(0);
+        expect(invoiceService.calcTotal([{ qty: 2, price: '15 000' }], 0)).toBe(30000);
+        expect(invoiceService.calcTotal([{ qty: 1, price: '15,5' }], 0)).toBe(15.5);
+    });
 });

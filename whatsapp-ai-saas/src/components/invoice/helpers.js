@@ -1,6 +1,17 @@
+/** Coerce qty/price/tax to a finite number; non-numeric input becomes fallback. */
+export function toFiniteNumber(value, fallback = 0) {
+    if (value === null || value === undefined || value === '') return fallback;
+    const n = typeof value === 'number' ? value : Number(String(value).replace(/\s/g, '').replace(',', '.'));
+    return Number.isFinite(n) ? n : fallback;
+}
+
 export function calc(items, taxRate = 0) {
-    const sub = (items || []).reduce((s, i) => s + (i.qty || 0) * (i.price || 0), 0);
-    const tax = sub * (taxRate / 100);
+    const sub = (items || []).reduce(
+        (s, i) => s + toFiniteNumber(i.qty) * toFiniteNumber(i.price),
+        0
+    );
+    const rate = toFiniteNumber(taxRate);
+    const tax = sub * (rate / 100);
     return { sub, tax, total: sub + tax };
 }
 

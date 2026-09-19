@@ -1,4 +1,5 @@
 import React from 'react';
+import { toFiniteNumber } from '../components/invoice/helpers';
 
 /**
  * Constantes, helpers et builders d'AdvancedAnalytics.
@@ -66,8 +67,11 @@ export function buildMonthlyRevenue(invoices) {
         if (!inv.createdAt) return;
         const m = new Date(inv.createdAt).getMonth();
         const items = inv.items || [];
-        const sub = items.reduce((s, i) => s + (i.qty || 0) * (i.price || 0), 0);
-        const total = sub * (1 + (inv.taxRate || 0) / 100);
+        const sub = items.reduce(
+            (s, i) => s + toFiniteNumber(i.qty) * toFiniteNumber(i.price),
+            0
+        );
+        const total = sub * (1 + toFiniteNumber(inv.taxRate) / 100);
         d[m].rev += total;
         d[m].count += 1;
     });
