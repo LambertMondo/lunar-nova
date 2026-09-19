@@ -7,7 +7,7 @@ const {
     getMsgRoot,
     collectChatListPreviews,
     extractMessageFromNode,
-} = require('./scrapers/parsers/whatsappWeb');
+} = require('./scrapers/parsers/whatsappWeb.js');
 
 const sseClients = new Map();
 const activeObservers = new Set();

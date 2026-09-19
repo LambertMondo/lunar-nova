@@ -1,7 +1,7 @@
 // Parseurs WhatsApp Web DOM — tests jsdom (même contrat que scrapersParsers.test.js).
 import { describe, it, expect, beforeEach } from 'vitest';
 
-const wa = require('../scrapers/parsers/whatsappWeb');
+const wa = require('../scrapers/parsers/whatsappWeb.js');
 
 describe('parsers/whatsappWeb — isMessageDataId / getMsgRoot', () => {
     beforeEach(() => {
