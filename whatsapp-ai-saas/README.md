@@ -119,9 +119,9 @@ cd backend && npm install && cd ..
 # 3. Configurer l'environnement backend
 cp backend/.env.example backend/.env
 
-# 4. S'assurer que le service Redis est lancé sur le port 6379
-# (Exemple via Docker)
-docker run -d -p 6379:6379 --name wacopilote-redis redis:alpine
+# 4. (Optionnel) Redis multi-instance — non requis en desktop (cache mémoire)
+# docker run -d -p 6379:6379 --name wacopilote-redis redis:alpine
+# Puis définir REDIS_URL=redis://localhost:6379 dans backend/.env
 
 # 5. Démarrer l'application complète (Frontend + Backend Express + Electron)
 npm run start:all
@@ -165,13 +165,13 @@ WaCopilote adopte une architecture monorepo hybride conçue pour la réactivité
 |  +-----------------------+ +------------------+ +------------------+  |
 |  |  SERVICES & ADAPTEURS | | SCRAPERS & WA    | | STORAGE ENGINES  |  |
 |  | Gemini / NVIDIA /     | | Playwright /     | | SQLite3 (DB)     |  |
-|  | OpenRouter / Ollama   | | Puppeteer Core | | Redis (Cache)    |  |
+|  | OpenRouter / Ollama   | | Puppeteer Core | | Cache (mem/Redis)|  |
 |  +-----------------------+ +------------------+ +------------------+  |
 +-----------------------------------------------------------------------+
 ```
 
 - **Execution Asynchrone & Non-Bloquante** : Les tâches lourdes (scraping, génération d'images, inférence LLM) s'exécutent en arrière-plan sans geler l'interface utilisateur React.
-- **Gestion Avancée du Cache Redis** : Cache des modèles LLM disponibles, limitation du taux de requêtes (`express-rate-limit`) et mise en mémoire tampon des propositions d'agents.
+- **Cache des propositions copilote** : en mémoire par défaut sur desktop ; Redis optionnel (`REDIS_URL`) pour un cache partagé multi-instance.
 - **Base de Données SQLite Persistante** : Schéma relationnel optimisé (`backend/db.js`) gérant les interactions, les contacts, les paramètres et les logs d'observabilité.
 
 ---
@@ -383,7 +383,7 @@ La configuration ESLint distingue désormais les trois environnements du dépôt
 | **Frontend Framework** | React 19, Vite 7, React Router 7, Zustand 5 |
 | **Styling & UI** | Tailwind CSS 3, Lucide React, Recharts, dnd-kit |
 | **Serveur Backend** | Node.js 20, Express.js 4 |
-| **Base de Données & Cache** | SQLite 3 (`sqlite3` / `sqlite`), Redis 5 (`redis`) |
+| **Base de Données & Cache** | SQLite 3 (`sqlite3` / `sqlite`), Redis 5 optionnel (`redis`) |
 | **Automation Web** | Playwright, Puppeteer Core |
 | **Moteurs d'IA (LLMs)** | `@google/genai`, NVIDIA NIM API, OpenRouter API, Ollama SDK |
 | **Génération d'Images** | Together AI (Qwen Image / Flux), HTML2Canvas |
@@ -397,7 +397,7 @@ La configuration ESLint distingue désormais les trois environnements du dépôt
 ### Prérequis Système
 - **Node.js** : v18.0.0 ou supérieur (v20+ recommandé)
 - **npm** : v9.0.0 ou supérieur
-- **Redis** : Instance Redis en cours d'exécution sur `localhost:6379`
+- **Redis** *(optionnel)* : uniquement si vous définissez `REDIS_URL` pour un cache partagé multi-instance. Le desktop utilise un cache mémoire par défaut.
 - **Navigateur Chromium** : (Installé automatiquement via Playwright)
 
 ### Procédure d'Installation Détaillée
@@ -425,7 +425,7 @@ La configuration ESLint distingue désormais les trois environnements du dépôt
    BACKEND_PORT=3000
    ELECTRON_CDP_PORT=8315
    VITE_DEV_PORT=5173
-   REDIS_URL=redis://localhost:6379
+   # REDIS_URL=redis://localhost:6379   # optionnel — cache partagé multi-instance
 
    # Clés API Optionnelles (Peuvent aussi être saisies dans l'interface de l'application)
    GEMINI_API_KEY=votre_cle_gemini
@@ -434,13 +434,14 @@ La configuration ESLint distingue désormais les trois environnements du dépôt
    TOGETHER_API_KEY=votre_cle_together_ai
    ```
 
-5. **Démarrer le serveur Redis (si ce n'est pas déjà fait)** :
+5. **(Optionnel) Redis pour cache multi-instance** — non requis en usage desktop :
    ```bash
    # Sur Linux / macOS
    redis-server
 
    # Via Docker (Toutes plateformes)
    docker run -d -p 6379:6379 --name redis-wacopilote redis:alpine
+   # Puis REDIS_URL=redis://localhost:6379 dans backend/.env
    ```
 
 6. **Lancer l'application en mode développement** :
@@ -481,7 +482,7 @@ whatsapp-ai-saas/
 │   ├── db.js               → Connexion & schéma de base de données SQLite3
 │   ├── geminiService.js    → Connecteurs LLM (+ openai/openrouter/ollamaService.js)
 │   ├── orderListener.js    → Moteur de détection des commandes WhatsApp
-│   ├── redisClient.js      → Client de mise en cache Redis
+│   ├── redisClient.js      → Cache propositions (mémoire par défaut, Redis si REDIS_URL)
 │   └── server.js           → Point d'entrée de l'application Express
 ├── build/                  → Ressources d'empaquetage (licence installeur, script NSIS)
 ├── docs/                   → Documentation d'architecture & notes de conception
@@ -525,8 +526,8 @@ R : Oui ! Si vous utilisez un modèle LLM local configuré avec **Ollama** (ex: 
 **Q : Comment configurer mes clés d'API (Gemini, NVIDIA NIM, OpenRouter) ?**  
 R : Vous pouvez renseigner vos clés directement dans l'interface de l'application via la rubrique **Settings** (Paramètres), ou les inscrire dans le fichier `backend/.env`.
 
-**Q : Que faire si j'obtiens une erreur "Redis Client Error" au démarrage ?**  
-R : WaCopilote requiert un serveur Redis actif sur le port 6379 pour la gestion du cache et du rate-limiting. Lancez Redis localement ou via la commande Docker : `docker run -d -p 6379:6379 --name redis redis:alpine`.
+**Q : Redis est-il obligatoire ? / Que faire si j'obtiens une erreur "Redis Client Error" ?**  
+R : Non — Redis est **optionnel**. Sans `REDIS_URL`, WaCopilote utilise un cache en mémoire pour les propositions copilote (idéal desktop). Ne définissez `REDIS_URL` que pour un cache partagé multi-instance ; si Redis est configuré mais injoignable, le cache retombe en mémoire (log debug, pas d'erreur CRITICAL).
 
 **Q : Est-il possible d'utiliser WaCopilote pour plusieurs comptes WhatsApp ?**  
 R : Oui, la gestion des contacts et des segments permet d'organiser vos listes de clients par marque ou par campagne.
