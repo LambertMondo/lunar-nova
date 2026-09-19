@@ -3,9 +3,24 @@ const path = require('path');
 const { pathToFileURL } = require('url');
 const { pool } = require('../db');
 
+/**
+ * Coerce a line-item qty/price/tax value to a finite number.
+ * Non-numeric strings (e.g. "15 000", "abc") previously produced NaN totals
+ * that were then persisted as 0 via `Number(NaN) || 0` in rowToInvoice —
+ * silently corrupting quote totals.
+ */
+function toFiniteNumber(value, fallback = 0) {
+    if (value === null || value === undefined || value === '') return fallback;
+    const n = typeof value === 'number' ? value : Number(String(value).replace(/\s/g, '').replace(',', '.'));
+    return Number.isFinite(n) ? n : fallback;
+}
+
 function calcTotal(items, taxRate = 0) {
-    const sub = (items || []).reduce((s, i) => s + (i.qty || 0) * (i.price || 0), 0);
-    return sub + sub * ((taxRate || 0) / 100);
+    const sub = (items || []).reduce(
+        (s, i) => s + toFiniteNumber(i.qty) * toFiniteNumber(i.price),
+        0
+    );
+    return sub + sub * (toFiniteNumber(taxRate) / 100);
 }
 
 function rowToInvoice(row) {
@@ -71,7 +86,12 @@ async function updateInvoice(id, draft = {}) {
 }
 
 async function deleteInvoice(id) {
-    await pool.query('DELETE FROM quotes WHERE id = $1', [id]);
+    const result = await pool.query('DELETE FROM quotes WHERE id = $1', [id]);
+    if (!result.rowCount) {
+        const err = new Error('Devis introuvable.');
+        err.statusCode = 404;
+        throw err;
+    }
     return { success: true };
 }
 
@@ -112,4 +132,13 @@ async function renderPdf(id, outPath = null) {
     }
 }
 
-module.exports = { listInvoices, getInvoice, createInvoice, updateInvoice, deleteInvoice, renderPdf };
+module.exports = {
+    listInvoices,
+    getInvoice,
+    createInvoice,
+    updateInvoice,
+    deleteInvoice,
+    renderPdf,
+    calcTotal,
+    toFiniteNumber
+};

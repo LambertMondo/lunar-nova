@@ -1,12 +1,12 @@
 import React from 'react';
 import { useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
-import { fmt } from './helpers';
+import { fmt, toFiniteNumber } from './helpers';
 
 export default function SortableLine({ item, onUpdate, onRemove, currency, t }) {
     const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: item.id });
     const rowStyle = { transform: CSS.Transform.toString(transform), transition, opacity: isDragging ? .45 : 1 };
-    const total = (item.qty || 0) * (item.price || 0);
+    const total = toFiniteNumber(item.qty) * toFiniteNumber(item.price);
 
     return (
         <tr ref={setNodeRef} style={rowStyle} className={`group ${isDragging ? 'bg-emerald-50/50 dark:bg-emerald-900/10' : ''}`}>

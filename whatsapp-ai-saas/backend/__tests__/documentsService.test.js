@@ -49,4 +49,28 @@ describe('documentsService — CRUD sur ai_documents (SQLite en mémoire)', () =
         await documentsService.deleteDocument(created.id);
         await expect(documentsService.getDocument(created.id)).rejects.toMatchObject({ statusCode: 404 });
     });
+
+    it.runIf(sqlite3Available)('deleteDocument lève une erreur 404 pour un id inconnu (pas de succès silencieux)', async () => {
+        await expect(documentsService.deleteDocument(999999)).rejects.toMatchObject({ statusCode: 404 });
+    });
+
+    it.runIf(sqlite3Available)('updateDocument sans title conserve le titre existant (CLI/MCP partial update)', async () => {
+        const created = await documentsService.createDocument({ title: 'Titre original', content: 'v1' });
+        const updated = await documentsService.updateDocument(created.id, { content: 'v2' });
+        expect(updated.title).toBe('Titre original');
+        expect(updated.content).toBe('v2');
+    });
+
+    it.runIf(sqlite3Available)('updateDocument sans content conserve le contenu existant', async () => {
+        const created = await documentsService.createDocument({ title: 'T1', content: 'garder' });
+        const updated = await documentsService.updateDocument(created.id, { title: 'T2' });
+        expect(updated.title).toBe('T2');
+        expect(updated.content).toBe('garder');
+    });
+
+    it.runIf(sqlite3Available)('updateDocument avec title vide retombe sur Untitled Document', async () => {
+        const created = await documentsService.createDocument({ title: 'Avant', content: 'x' });
+        const updated = await documentsService.updateDocument(created.id, { title: '', content: 'x' });
+        expect(updated.title).toBe('Untitled Document');
+    });
 });

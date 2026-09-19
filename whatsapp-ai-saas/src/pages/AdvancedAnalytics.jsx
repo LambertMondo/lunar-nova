@@ -11,6 +11,7 @@ import {
     buildMonthlyRevenue, buildAgentActivity, buildTaskStats,
     C, Icons,
 } from '../utils/analyticsHelpers';
+import { toFiniteNumber } from '../components/invoice/helpers';
 import { KPICard, SectionTitle, Panel, CustomTooltip, ZustandInspector } from '../components/analytics/AnalyticsUI';
 
 // ── MAIN COMPONENT ────────────────────────────────────────────────
@@ -56,8 +57,11 @@ export default function AdvancedAnalytics() {
     const totalRevenue = useMemo(() =>
         invoices.reduce((sum, inv) => {
             const items = inv.items || [];
-            const sub = items.reduce((s, i) => s + (i.qty || 0) * (i.price || 0), 0);
-            return sum + sub * (1 + (inv.taxRate || 0) / 100);
+            const sub = items.reduce(
+                (s, i) => s + toFiniteNumber(i.qty) * toFiniteNumber(i.price),
+                0
+            );
+            return sum + sub * (1 + toFiniteNumber(inv.taxRate) / 100);
         }, 0), [invoices]);
 
     const paidInvoices = invoices.filter(i => i.status === 'paid').length;
@@ -422,8 +426,11 @@ export default function AdvancedAnalytics() {
                                 <tbody>
                                     {[...invoices].reverse().slice(0, 10).map(inv => {
                                         const items = inv.items || [];
-                                        const sub = items.reduce((s, i) => s + (i.qty || 0) * (i.price || 0), 0);
-                                        const total = sub * (1 + (inv.taxRate || 0) / 100);
+                                        const sub = items.reduce(
+                                            (s, i) => s + toFiniteNumber(i.qty) * toFiniteNumber(i.price),
+                                            0
+                                        );
+                                        const total = sub * (1 + toFiniteNumber(inv.taxRate) / 100);
                                         const statusColors = { paid: C.primary2, pending: C.amber, overdue: C.red, draft: C.gray400 };
                                         const statusLabels = { paid: t('paid'), pending: t('pending'), overdue: t('overdue'), draft: t('draft') };
                                         return (
