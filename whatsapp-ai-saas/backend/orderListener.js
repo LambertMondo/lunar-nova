@@ -2,6 +2,12 @@ const puppeteer = require('puppeteer-core');
 const db = require('./db');
 const aiController = require('./aiController');
 const { redactMessage, redactContact } = require('./logRedact');
+const {
+    isMessageDataId,
+    getMsgRoot,
+    collectChatListPreviews,
+    extractMessageFromNode,
+} = require('./scrapers/parsers/whatsappWeb.js');
 
 const sseClients = new Map();
 const activeObservers = new Set();
@@ -175,9 +181,15 @@ async function attachObserver(instanceId) {
             });
         } catch {}
 
-        await targetPage.evaluate(() => {
+        // Helpers auto-portants sérialisés dans la page (même contrat que scrapers/parsers/*).
+        await targetPage.evaluate((parserSrcs) => {
             if (!document.body || window.__iol_observer) return;
-            
+
+            const isMessageDataId = (0, eval)('(' + parserSrcs.isMessageDataId + ')');
+            const getMsgRoot = (0, eval)('(' + parserSrcs.getMsgRoot + ')');
+            const collectChatListPreviews = (0, eval)('(' + parserSrcs.collectChatListPreviews + ')');
+            const extractMessageFromNode = (0, eval)('(' + parserSrcs.extractMessageFromNode + ')');
+
             window.onIolDebug('🚀 Order Observer attaché (V3: Strict Structural Scraping) !');
 
             // Déduplication des messages déjà traités.
@@ -202,95 +214,34 @@ async function attachObserver(instanceId) {
                     }
                 };
             }
-            
+
             // 1. Polling for Left Panel (Global incoming messages across all chats!)
+            // Interval inchangé (3000 ms) — pas d'agressivité supplémentaire.
             if (!window.__iol_poller) {
                 window.__iol_poller = setInterval(() => {
-                    // WhatsApp's atomic CSS classes (x78zum5, x6s0dn4, ...) are regenerated on every
-                    // redesign, but the data-testid anchors it ships for its own QA are stable across
-                    // rebuilds, so prefer those; fall back to the older generic-attribute scraping only
-                    // if the testids are absent (older client build).
-                    let recentChats = Array.from(document.querySelectorAll('[data-testid="cell-frame-container"]')).slice(0, 15);
-                    if (recentChats.length === 0) {
-                        const contactNodes = document.querySelectorAll('#pane-side span[title][dir="auto"]');
-                        recentChats = Array.from(contactNodes).slice(0, 15).map(node => node.closest('div[role="row"], div[role="listitem"], div[style*="transform"]'));
-                    }
-
-                    for (const chatItem of recentChats) {
-                        if (!chatItem) continue;
-
-                        let contact = 'Client (Liste)';
-                        const nameNode = chatItem.querySelector('[data-testid="cell-frame-title"] span[title][dir="auto"]') || chatItem.querySelector('span[title][dir="auto"]');
-                        if (nameNode) contact = nameNode.getAttribute('title') || nameNode.innerText;
-
-                        // Try to get message preview, scoped to the preview area when available to avoid
-                        // picking up unrelated dir="ltr" spans (e.g. group sender-name prefixes).
-                        let text = '';
-                        const previewScope = chatItem.querySelector('[data-testid="cell-frame-secondary"]') || chatItem;
-                        const spans = previewScope.querySelectorAll('span[dir="ltr"]');
-                        for (const node of spans) {
-                            const t = node.innerText || node.textContent || '';
-                            if (t && t.length > 2 && t !== contact) text = t;
-                        }
-
-                        if (text && text.trim().length > 0) {
-                            const hash = contact + '|' + text.trim();
-                            if (!window.__iol_seen.has(hash)) {
-                                window.__iol_seen.add(hash);
-                                window.onIolDebug(`[Poller] Nouveau message en liste (${text.length} car.)`);
-                                window.onNewWaMessage(contact, text.trim());
-                            }
+                    const previews = collectChatListPreviews(document);
+                    for (const { contact, text } of previews) {
+                        const hash = contact + '|' + text;
+                        if (!window.__iol_seen.has(hash)) {
+                            window.__iol_seen.add(hash);
+                            window.onIolDebug(`[Poller] Nouveau message en liste (${text.length} car.)`);
+                            window.onNewWaMessage(contact, text);
                         }
                     }
                 }, 3000);
             }
 
-            // WhatsApp's atomic CSS class names get regenerated on every redesign, so
-            // '.copyable-text[data-pre-plain-text]' can silently stop matching anything. The
-            // 'data-id' on a message row (prefixed 'true_'/'false_' for outgoing/incoming) is
-            // WhatsApp's own internal store key, not a style artifact, so it survives UI overhauls
-            // and is used here as the primary anchor; the legacy class-based anchor is kept as a
-            // fallback for older client builds.
-            const isMessageDataId = (id) => !!id && (id.startsWith('true_') || id.startsWith('false_'));
-            const getMsgRoot = (el) => {
-                if (!el || !el.closest) return null;
-                const legacy = el.closest('.copyable-text[data-pre-plain-text]');
-                if (legacy) return legacy;
-                const modern = el.closest('[data-id]');
-                if (modern && isMessageDataId(modern.getAttribute('data-id'))) return modern;
-                // Last resort: the chat list in this build uses role="row" grid items and the message
-                // list likely shares the same virtualization pattern; excluding #pane-side keeps this
-                // from double-processing sidebar rows already covered by the poller above.
-                const ariaRow = el.closest('div[role="row"]');
-                if (ariaRow && !ariaRow.closest('#pane-side')) return ariaRow;
-                return null;
-            };
-
             // 2. Specialized Mutation Observer for Active Chat
             window.__iol_observer = new MutationObserver((mutations) => {
                 const processMessageNode = (msg) => {
-                    if (!msg) return;
-                    try {
-                        const preTextNode = msg.hasAttribute('data-pre-plain-text') ? msg : msg.querySelector('[data-pre-plain-text]');
-                        const preText = preTextNode ? (preTextNode.getAttribute('data-pre-plain-text') || '') : '';
-                        let contact = 'Client (Actif)';
-                        const match = preText.match(/\]\s([^:]+):/);
-                        if (match && match[1]) {
-                            contact = match[1].trim();
-                        }
-
-                        const textNode = msg.querySelector('span.selectable-text, span.copyable-text, span[dir="ltr"]');
-                        const text = textNode ? (textNode.innerText || textNode.textContent || '').trim() : msg.innerText.trim();
-
-                        if (text && text.length > 5) {
-                            const hash = contact + '|' + text;
-                            if (!window.__iol_seen.has(hash)) {
-                                window.__iol_seen.add(hash);
-                                window.onIolDebug(`[Observer] Nouveau message en conversation (${text.length} car.)`);
-                                window.onNewWaMessage(contact, text);
-                            }
-                        }
-                    } catch {}
+                    const parsed = extractMessageFromNode(msg);
+                    if (!parsed) return;
+                    const hash = parsed.contact + '|' + parsed.text;
+                    if (!window.__iol_seen.has(hash)) {
+                        window.__iol_seen.add(hash);
+                        window.onIolDebug(`[Observer] Nouveau message en conversation (${parsed.text.length} car.)`);
+                        window.onNewWaMessage(parsed.contact, parsed.text);
+                    }
                 };
 
                 for (const m of mutations) {
@@ -300,57 +251,60 @@ async function attachObserver(instanceId) {
                         continue;
                     }
 
-                for (const node of m.addedNodes) {
-                    if (node.nodeType !== 1) {
-                        if (node.parentElement) {
-                            const pMsg = getMsgRoot(node.parentElement);
-                            if (pMsg) processMessageNode(pMsg);
+                    for (const node of m.addedNodes) {
+                        if (node.nodeType !== 1) {
+                            if (node.parentElement) {
+                                const pMsg = getMsgRoot(node.parentElement);
+                                if (pMsg) processMessageNode(pMsg);
+                            }
+                            continue;
                         }
-                        continue;
-                    }
 
-                    const msgDivs = Array.from(node.querySelectorAll ? node.querySelectorAll('.copyable-text[data-pre-plain-text]') : []);
-                    if (node.matches && node.matches('.copyable-text[data-pre-plain-text]')) {
-                        msgDivs.push(node);
-                    }
-                    if (node.querySelectorAll) {
-                        Array.from(node.querySelectorAll('[data-id]')).forEach(el => {
-                            if (isMessageDataId(el.getAttribute('data-id')) && !msgDivs.includes(el)) msgDivs.push(el);
-                        });
-                    }
-                    if (node.matches) {
-                        const id = node.getAttribute && node.getAttribute('data-id');
-                        if (isMessageDataId(id) && !msgDivs.includes(node)) msgDivs.push(node);
-                    }
-
-                    if (msgDivs.length === 0) {
-                        if (node.querySelectorAll) {
-                            Array.from(node.querySelectorAll('div[role="row"]')).forEach(el => {
-                                if (!el.closest('#pane-side') && !msgDivs.includes(el)) msgDivs.push(el);
-                            });
-                        }
-                        if (node.matches && node.matches('div[role="row"]') && !node.closest('#pane-side') && !msgDivs.includes(node)) {
+                        const msgDivs = Array.from(node.querySelectorAll ? node.querySelectorAll('.copyable-text[data-pre-plain-text]') : []);
+                        if (node.matches && node.matches('.copyable-text[data-pre-plain-text]')) {
                             msgDivs.push(node);
                         }
-                    }
+                        if (node.querySelectorAll) {
+                            Array.from(node.querySelectorAll('[data-id]')).forEach(el => {
+                                if (isMessageDataId(el.getAttribute('data-id')) && !msgDivs.includes(el)) msgDivs.push(el);
+                            });
+                        }
+                        if (node.matches) {
+                            const id = node.getAttribute && node.getAttribute('data-id');
+                            if (isMessageDataId(id) && !msgDivs.includes(node)) msgDivs.push(node);
+                        }
 
-                    // If the node we're adding is INSIDE an existing message container
-                    const parentMsg = getMsgRoot(node);
-                    if (parentMsg && !msgDivs.includes(parentMsg)) {
-                        msgDivs.push(parentMsg);
-                    }
+                        if (msgDivs.length === 0) {
+                            if (node.querySelectorAll) {
+                                Array.from(node.querySelectorAll('div[role="row"]')).forEach(el => {
+                                    if (!el.closest('#pane-side') && !msgDivs.includes(el)) msgDivs.push(el);
+                                });
+                            }
+                            if (node.matches && node.matches('div[role="row"]') && !node.closest('#pane-side') && !msgDivs.includes(node)) {
+                                msgDivs.push(node);
+                            }
+                        }
 
-                    for (const msg of msgDivs) {
-                        processMessageNode(msg);
+                        const parentMsg = getMsgRoot(node);
+                        if (parentMsg && !msgDivs.includes(parentMsg)) {
+                            msgDivs.push(parentMsg);
+                        }
+
+                        for (const msg of msgDivs) {
+                            processMessageNode(msg);
+                        }
                     }
-                } // Ends addedNodes loop
-            } // Ends mutations loop
+                }
+            });
+
+            window.__iol_observer.observe(document.body, { childList: true, subtree: true, characterData: true });
+        }, {
+            isMessageDataId: isMessageDataId.toString(),
+            getMsgRoot: getMsgRoot.toString(),
+            collectChatListPreviews: collectChatListPreviews.toString(),
+            extractMessageFromNode: extractMessageFromNode.toString(),
         });
 
-        // Track both structural additions and text rendering variations
-        window.__iol_observer.observe(document.body, { childList: true, subtree: true, characterData: true });
-    });
-    
     targetPage.once('close', () => {
         activeObservers.delete(instanceId);
         browserConnections.delete(instanceId);
