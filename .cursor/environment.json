@@ -1,0 +1,15 @@
+{
+  "name": "WaCopilote (whatsapp-ai-saas)",
+  "install": "bash .cursor/install.sh",
+  "terminals": [
+    {
+      "name": "backend",
+      "command": "cd whatsapp-ai-saas && npm run start:backend"
+    },
+    {
+      "name": "frontend",
+      "command": "cd whatsapp-ai-saas && npm run dev -- --host"
+    }
+  ],
+  "ports": [3000, 5173]
+}
